@@ -1,17 +1,16 @@
-#!/usr/bin/env python2
-import pydeep
-from os.path import abspath, isfile, isdir, join
-import json
-import StringIO
-import tarfile
-import hashlib
 import base64
-from struct import unpack
-from glob import iglob
+import hashlib
+import json
+import pydeep
+import tarfile
 
+from glob import iglob
+from io import BytesIO
+from os.path import abspath, isfile, isdir, join
+from struct import unpack
 
 def get_all_7_char_chunks(h):
-    return set((unpack("<Q", base64.b64decode(h[i:i+7] + "=") + "\x00\x00\x00")[0] for i in xrange(len(h) - 6)))
+    return set((unpack("<Q", base64.b64decode(h[i:i+7] + "=") + b"\x00\x00\x00")[0] for i in range(len(h) - 6)))
 
 
 def preprocess_hash(h):
@@ -81,7 +80,7 @@ def generate_gexf(bin_scores):
             '</graph>' \
             '</gexf>'
 
-    return gexf
+    return gexf.encode("utf-8")
 
 
 def get_version():
@@ -92,8 +91,7 @@ if __name__ == "__main__":
 
     parser = ArgumentParser(
         prog=__file__,
-        description="Clusters files based on their ssdeep hash",
-        version="%(prog)s v" + get_version() + " by Brian Wallace (@botnet_hunter)",
+        description="Clusters files based on their ssdeep hash. %(prog)s v" + get_version() + " by Brian Wallace (@botnet_hunter)",
         epilog="%(prog)s v" + get_version() + " by Brian Wallace (@botnet_hunter)"
     )
     parser.add_argument('path', metavar='path', type=str, nargs='+', help="Paths to files or directories to scan")
@@ -109,7 +107,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.dontcompute and args.storefiles:
-        print "Unfortunately, we can't store files which are not provided as input, arguments are conflicting"
+        print("Unfortunately, we can't store files which are not provided as input, arguments are conflicting")
         import sys
         sys.exit(1)
 
@@ -151,7 +149,7 @@ if __name__ == "__main__":
     for path in paths:
         if not args.dontcompute:
             hashes[path] = pydeep.hash_file(path)
-            sha256s[path] = hashlib.sha256(file(path, 'rb').read()).hexdigest()
+            sha256s[path] = hashlib.sha256(open(path, 'rb').read()).hexdigest()
         else:
             if "," in path:
                 shash, path = path.split(",", 1)
@@ -159,7 +157,7 @@ if __name__ == "__main__":
             else:
                 shash = path
             hashes[path] = shash
-            sha256s[path] = hashlib.sha256(file(path, 'rb').read()).hexdigest() if isfile(path) else hashlib.sha256(path).hexdigest()
+            sha256s[path] = hashlib.sha256(open(path, 'rb').read()).hexdigest() if isfile(path) else hashlib.sha256(path).hexdigest()
         block_size, chunk, double_chunk = preprocess_hash(hashes[path])
 
         similar_to = add_to_integer_db(block_size, chunk, path) | add_to_integer_db(block_size * 2, double_chunk, path)
@@ -181,12 +179,12 @@ if __name__ == "__main__":
                 if path not in scores[other]:
                     scores[other][path] = score
 
-        print "{0}\tSHA256: {1}\tssdeep: {2}".format(path, sha256s[path], hashes[path])
+        print("{0}\tSHA256: {1}\tssdeep: {2}".format(path, sha256s[path], hashes[path]))
 
     groups = []
     for path in matches.keys():
         in_a_group = False
-        for g in xrange(len(groups)):
+        for g in range(len(groups)):
             if path in groups[g]:
                 in_a_group = True
                 continue
@@ -200,31 +198,31 @@ if __name__ == "__main__":
         if not in_a_group:
             groups.append([path])
 
-    for g in xrange(len(groups)):
+    for g in range(len(groups)):
         groups[g].sort()
 
     # Copy files to zipfile
-    with tarfile.TarFile(args.output, mode='a') as mytar:
+    with tarfile.TarFile(args.output, mode='w') as mytar:
         if args.storefiles:
-            for group in xrange(len(groups)):
+            for group in range(len(groups)):
                 for path in groups[group]:
                     mytar.add(path, arcname=join(str(group), sha256s[path]))
 
-        gexf_tar_file = StringIO.StringIO()
+        gexf_tar_file = BytesIO()
         gexf_tar_file.write(generate_gexf(scores))
-        gexf_tar_file.seek(0)
         info = tarfile.TarInfo(name="file_distance.gexf")
-        info.size = len(gexf_tar_file.buf)
+        info.size = gexf_tar_file.tell()
+        gexf_tar_file.seek(0)
         mytar.addfile(tarinfo=info, fileobj=gexf_tar_file)
 
-        json_tar_file = StringIO.StringIO()
-        json_tar_file.write(json.dumps({"groups": groups, "hashes": hashes}))
-        json_tar_file.seek(0)
+        json_tar_file = BytesIO()
+        json_tar_file.write(json.dumps({"groups": groups, "hashes": hashes}).encode("utf-8"))
         info = tarfile.TarInfo(name="groups.json")
-        info.size = len(json_tar_file.buf)
+        info.size = json_tar_file.tell()
+        json_tar_file.seek(0)
         mytar.addfile(tarinfo=info, fileobj=json_tar_file)
 
-    print "{0} files organized into {1} groups".format(len(hashes), len(groups))
-    print "Groups distribution:"
-    for group in xrange(len(groups)):
-        print "Group {0} has {1} files".format(group, len(groups[group]))
+    print("{0} files organized into {1} groups".format(len(hashes), len(groups)))
+    print("Groups distribution:")
+    for group in range(len(groups)):
+        print("Group {0} has {1} files".format(group, len(groups[group])))
